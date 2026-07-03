@@ -14,7 +14,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 # --- CONFIGURATION ---
-API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'  # <--- သင့် Bot Token ကို ပြန်ထည့်ပါ
+API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'  
 bot = telebot.TeleBot(API_TOKEN)
 
 # --- DATABASE SYSTEM ---
@@ -25,6 +25,7 @@ def init_db():
     cursor.execute('CREATE TABLE IF NOT EXISTS filters (keyword TEXT PRIMARY KEY, reply TEXT)')
     cursor.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
     cursor.execute('CREATE TABLE IF NOT EXISTS warnings (user_id INTEGER, chat_id INTEGER, count INTEGER, PRIMARY KEY (user_id, chat_id))')
+    cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT)')
     conn.commit()
     conn.close()
 
@@ -44,6 +45,64 @@ def db_action(query, params=(), fetchone=False, fetchall=False):
 def is_admin(message):
     status = bot.get_chat_member(message.chat.id, message.from_user.id).status
     return status in ['creator', 'administrator']
+
+# --- NEW /START & HELP COMMAND LIST ---
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome_and_commands(message):
+    if not message.from_user.is_bot:
+        db_action('INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)', 
+                  (message.from_user.id, message.from_user.username, message.from_user.first_name))
+        
+    help_text = (
+        f"👋 **မင်္ဂလာပါ {message.from_user.first_name} ရေ...**\n"
+        "ကျွန်တော်ကတော့ Group မန်နေဂျာ Rose Bot ဖြစ်ပါတယ်ဗျာ။ ✨\n\n"
+        "🤖 **အသုံးပြုနိုင်သော Commands များ စာရင်း-**\n\n"
+        "ℹ️ **အထွေထွေသုံးရန်-**\n"
+        "• `/start` သို့မဟုတ် `/help` - ဤလမ်းညွှန်ချက်ကို ကြည့်ရန်\n"
+        "• `/rules` - Group ရဲ့ စည်းကမ်းချက်များကို ကြည့်ရန်\n"
+        "• `/all` - Group ထဲရှိ လူအားလုံးကို Attention ပေးရန်\n\n"
+        "🛡️ **Admin များအတွက်သာ (Group စီမံခန့်ခွဲရန်)-**\n"
+        "• `/setrules [စာသား]` - Group စည်းကမ်းချက် သတ်မှတ်ရန်\n"
+        "• `/setwelcome [စာသား]` - အဖွဲ့ဝင်သစ် ကြိုဆိုစာ သတ်မှတ်ရန်\n"
+        "• `/ban` - (Reply ပေးပြီးသုံးရန်) လူကို အပြီးပိတ်ပစ်ရန်\n"
+        "• `/kick` - (Reply ပေးပြီးသုံးရန်) လူကို Group ထဲက မောင်းထုတ်ရန်\n"
+        "• `/mute` - (Reply ပေးပြီးသုံးရန်) လူကို စာရိုက်ခွင့် ပိတ်ရန်\n"
+        "• `/unmute` - (Reply ပေးပြီးသုံးရန်) စာရိုက်ခွင့် ပြန်ဖွင့်ပေးရန်\n"
+        "• `/warn` - (Reply ပေးပြီးသုံးရန်) သတိပေးရန် (၃ ကြိမ်ပြည့်လျှင် Auto Ban)\n"
+        "• `/pin` - (Reply ပေးပြီးသုံးရန်) စာကို Pin ချိတ်ထားရန်\n\n"
+        "⚙️ **စကားလုံး Filter & Auto Learn စနစ်-**\n"
+        "• `/filter [စကားလုံး] [ပြန်ဖြေမည့်စာ]` - ၎င်းစာလုံးရိုက်ရင် Auto စာပြန်ခိုင်းရန်\n"
+        "• `/stop [စကားလုံး]` - သတ်မှတ်ထားသော Filter ကို ပြန်ဖျက်ရန်\n\n"
+        "📢 **ပိုင်ရှင် / Admin အတွက် စာဖြန့်ဝေခြင်း-**\n"
+        "• `/broadcast [ပို့ချင်တဲ့စာ]` - Bot ကိုသုံးဖူးသမျှ လူအကုန်လုံးဆီသို့ တစ်ပြိုင်နက် Auto စာလှမ်းပို့ရန်\n"
+    )
+    bot.reply_to(message, help_text, parse_mode="Markdown")
+
+# --- AUTO BROADCAST TO ALL USERS ---
+@bot.message_handler(commands=['broadcast'])
+def broadcast_message(message):
+    if is_admin(message):
+        text_to_send = message.text.replace('/broadcast', '').strip()
+        if not text_to_send:
+            bot.reply_to(message, "⚠️ သုံးနည်း - `/broadcast [ပို့ချင်တဲ့စာ]` လို့ ရိုက်ပါဗျာ။", parse_mode="Markdown")
+            return
+            
+        all_users = db_action('SELECT user_id FROM users', fetchall=True)
+        if not all_users:
+            bot.reply_to(message, "❌ Database ထဲမှာ စာပို့စရာ User တစ်ယောက်မှ မရှိသေးပါဘူး။")
+            return
+            
+        success_count = 0
+        fail_count = 0
+        
+        for user in all_users:
+            try:
+                bot.send_message(user[0], text_to_send)
+                success_count += 1
+            except:
+                fail_count += 1
+                
+        bot.reply_to(message, f"📢 **Broadcast ဖြန့်ဝေပြီးပါပြီ။**\n\n✅ အောင်မြင် - {success_count} ဦး\n❌ ကျရှုံး - {fail_count} ဦး", parse_mode="Markdown")
 
 # --- ROSE BOT MANAGEMENT COMMANDS ---
 @bot.message_handler(commands=['setwelcome'])
@@ -142,10 +201,20 @@ def greeting_members(message):
     for member in message.new_chat_members:
         bot.send_message(message.chat.id, f"👋 Hello {member.first_name}, {welcome_text}")
 
-# --- AUTO SPAM & AUTOMATIC AUTO-LEARNING SYSTEM ---
+# --- 🌟 ONE AND ONLY ALL-MESSAGE HANDLER (AUTO SPAM & AUTO-LEARNING & USER DB LOG) 🌟 ---
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
+    # စာလာရိုက်သူကို Database ထဲ Auto မှတ်မယ်
+    if not message.from_user.is_bot:
+        db_action('INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)', 
+                  (message.from_user.id, message.from_user.username, message.from_user.first_name))
+
+    # Render Logs မှာ လှမ်းပြမယ်
+    print(f"[💬 Message] From: {message.from_user.first_name} (ID: {message.from_user.id}) | Text: {message.text}")
+
     user_text = message.text or ""
+    
+    # Auto Spam Link Filter
     if "http" in user_text.lower() or "t.me/" in user_text.lower():
         try:
             bot.delete_message(message.chat.id, message.message_id)
@@ -154,11 +223,13 @@ def handle_messages(message):
             return
         except: pass
 
+    # Word Filter
     filter_res = db_action('SELECT reply FROM filters WHERE keyword=?', (user_text.lower(),), fetchone=True)
     if filter_res:
         bot.reply_to(message, filter_res[0])
         return
 
+    # Auto Learn & Reply System
     if message.reply_to_message:
         if not message.reply_to_message.from_user.is_bot and not message.from_user.is_bot:
             question = message.reply_to_message.text
@@ -171,7 +242,6 @@ def handle_messages(message):
             bot.reply_to(message, learn_res[0])
 
 if __name__ == "__main__":
-    # Web server ကို နောက်ကွယ်မှာ ခွဲပတ်ထားမယ်
     threading.Thread(target=run_flask).start()
-    print("[🚀] Server & Bot are running...")
+    print("[🚀] Server & Bot are running perfectly...")
     bot.infinity_polling()
