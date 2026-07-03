@@ -1,11 +1,23 @@
 import telebot
 import sqlite3
+import threading
+from flask import Flask
 
-# --- 1. CONFIGURATION ---
-API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
+# --- WEB SERVER FOR RENDER (KEEP BOT ALIVE) ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+# --- CONFIGURATION ---
+API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'  # <--- သင့် Bot Token ကို ပြန်ထည့်ပါ
 bot = telebot.TeleBot(API_TOKEN)
 
-# --- 2. DATABASE SYSTEM ---
+# --- DATABASE SYSTEM ---
 def init_db():
     conn = sqlite3.connect('rose_bot.db')
     cursor = conn.cursor()
@@ -33,8 +45,7 @@ def is_admin(message):
     status = bot.get_chat_member(message.chat.id, message.from_user.id).status
     return status in ['creator', 'administrator']
 
-# --- 3. ROSE BOT MANAGEMENT COMMANDS ---
-
+# --- ROSE BOT MANAGEMENT COMMANDS ---
 @bot.message_handler(commands=['setwelcome'])
 def set_welcome(message):
     if is_admin(message):
@@ -123,7 +134,7 @@ def pin_message(message):
 def mention_all(message):
     bot.reply_to(message, "📢 Attention everyone! Please check this out.")
 
-# --- 4. NEW MEMBER GREETING ---
+# --- NEW MEMBER GREETING ---
 @bot.message_handler(content_types=['new_chat_members'])
 def greeting_members(message):
     res = db_action('SELECT value FROM settings WHERE key="welcome"', fetchone=True)
@@ -131,12 +142,10 @@ def greeting_members(message):
     for member in message.new_chat_members:
         bot.send_message(message.chat.id, f"👋 Hello {member.first_name}, {welcome_text}")
 
-# --- 5. AUTO SPAM & AUTOMATIC AUTO-LEARNING SYSTEM ---
+# --- AUTO SPAM & AUTOMATIC AUTO-LEARNING SYSTEM ---
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     user_text = message.text or ""
-    
-    # Spam Filter
     if "http" in user_text.lower() or "t.me/" in user_text.lower():
         try:
             bot.delete_message(message.chat.id, message.message_id)
@@ -145,27 +154,24 @@ def handle_messages(message):
             return
         except: pass
 
-    # Custom Filters Checking
     filter_res = db_action('SELECT reply FROM filters WHERE keyword=?', (user_text.lower(),), fetchone=True)
     if filter_res:
         bot.reply_to(message, filter_res[0])
         return
 
-    # 🔥 [SUPER AUTO-LEARNING LOGIC] 🔥
-    # Group ထဲမှာ လူတွေအချင်းချင်း စကားပြောရင် (ဘယ်သူပဲဖြစ်ဖြစ် တစ်ယောက်နဲ့တစ်ယောက် Reply ပြန်ပြီး စကားပြောရင်) 
-    # Bot က အလိုအလျောက် ခိုးမှတ်ပြီး database ထဲ ထည့်သွားမယ့်စနစ်
     if message.reply_to_message:
-        # စာသားတွေ အလွတ်ရအောင် မှတ်မယ် (Bot အချင်းချင်း ပြန်တဲ့စာတွေကိုတော့ ချန်လှပ်ထားမယ်)
         if not message.reply_to_message.from_user.is_bot and not message.from_user.is_bot:
             question = message.reply_to_message.text
             answer = message.text
-            if question and answer: # စာသားအမှန်ပဲ ဖြစ်ရမယ် (ပုံတွေ၊ ဖိုင်တွေ မဟုတ်ရဘူး)
+            if question and answer:
                 db_action('INSERT OR REPLACE INTO knowledge (question, answer) VALUES (?, ?)', (question.lower().strip(), answer.strip()))
     else:
-        # လူတွေက သာမန်စာရိုက်လိုက်လို့ Database ထဲမှာ ရှိနေရင် အလိုအလျောက် ဝင်ဖြေပေးမယ်
         learn_res = db_action('SELECT answer FROM knowledge WHERE question=?', (user_text.lower().strip(),), fetchone=True)
         if learn_res:
             bot.reply_to(message, learn_res[0])
 
-print("[🚀] Super AI Auto-Learning & Rose Bot Clone is now running...")
-bot.infinity_polling()
+if __name__ == "__main__":
+    # Web server ကို နောက်ကွယ်မှာ ခွဲပတ်ထားမယ်
+    threading.Thread(target=run_flask).start()
+    print("[🚀] Server & Bot are running...")
+    bot.infinity_polling()
