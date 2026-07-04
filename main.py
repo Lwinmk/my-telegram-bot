@@ -6,137 +6,163 @@ from flask import Flask
 
 app = Flask('')
 @app.route('/')
-def home():
-    return "Rain Bot is running perfectly!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+def home(): return "Global AI Brain Bot is running!"
+def run_flask(): app.run(host='0.0.0.0', port=8080)
 
 # --- မင်းရဲ့ TOKEN ---
-API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'  
+API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
 bot = telebot.TeleBot(API_TOKEN)
+DB_PATH = 'rain_bot_global.db'
 
-# --- DATABASE SYSTEM ---
-DB_PATH = os.path.join(os.path.dirname(__file__), 'rain_bot.db')
-
+# --- DATABASE SETUP ---
 def init_db():
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS filters (keyword TEXT PRIMARY KEY, reply TEXT)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS bad_words (word TEXT PRIMARY KEY)')
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS memory (q TEXT PRIMARY KEY, a TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS blacklist (word TEXT PRIMARY KEY)')
+    c.execute('CREATE TABLE IF NOT EXISTS warns (chat_id INTEGER, user_id INTEGER, count INTEGER)')
+    # 📢 Group အလိုက် Member စာရင်းကို မှတ်ရန် Table အသစ် 📢
+    c.execute('CREATE TABLE IF NOT EXISTS members (chat_id INTEGER, user_id INTEGER, name TEXT, PRIMARY KEY(chat_id, user_id))')
     conn.commit()
     conn.close()
 init_db()
 
 def db_action(query, params=(), fetchone=False, fetchall=False):
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    res = None
-    if fetchone: res = cursor.fetchone()
-    elif fetchall: res = cursor.fetchall()
+    c = conn.cursor()
+    c.execute(query, params)
+    res = c.fetchone() if fetchone else (c.fetchall() if fetchall else None)
     conn.commit()
     conn.close()
     return res
 
-def is_admin(message):
-    try:
-        if message.chat.type == 'private':
-            return True
-        status = bot.get_chat_member(message.chat.id, message.from_user.id).status
-        return status in ['creator', 'administrator']
-    except:
-        return False
+def is_admin(m):
+    try: 
+        if m.chat.type == 'private': return True
+        return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
+    except: return False
 
-# --- 🌟 BOT COMMANDS LIST AUTO SET SYSTEM (မင်းပြောတဲ့အတိုင်း သန့်ရှင်းရေးလုပ်ထားသည်) 🌟 ---
-def set_bot_commands():
+# --- COMMANDS ---
+def set_cmds():
     try:
-        commands = [
-            telebot.types.BotCommand("start", "Rain Bot မှ ကြိုဆိုပါတယ်ဗျာ! ✨")
-        ]
-        bot.set_my_commands(commands)
+        bot.set_my_commands([
+            telebot.types.BotCommand("start", "Rain Bot ကို စတင်ရန် 🚀"),
+            telebot.types.BotCommand("addbl", "ဆဲစာလုံးပိတ်ရန် /addbl [စာ] 🚫"),
+            telebot.types.BotCommand("rmbl", "ဆဲစာလုံးပြန်ဖွင့်ရန် /rmbl [စာ] 🔊"),
+            telebot.types.BotCommand("all", "Group ရှိ လူအားလုံးကို Tag ခေါ်ရန် (Admin သာ) 📢"),
+            telebot.types.BotCommand("warn", "အဖွဲ့ဝင်ကို သတိပေးရန် ⚠️")
+        ])
     except: pass
 
-# --- COMMAND HANDLERS (START နှိပ်မှ ဒီစာရင်းတွေ ပေါ်လာမည်) ---
-@bot.message_handler(commands=['start', 'help'])
-def send_help(message):
-    help_text = (
-        "👋 **Rain Bot မှ ကြိုဆိုပါတယ်ဗျာ!**\n\n"
-        "🤖 **အသုံးပြုနိုင်သော Commands များ-**\n"
-        "• `/word [စာလုံး]` - ရိုင်းစိုင်းသော စကားလုံး ပိတ်ရန် 🚫\n"
-        "• `/unword [စာလုံး]` - ပိတ်ထားသော စကားလုံး ပြန်ဖွင့်ရန် 🔊\n"
-        "• `/filter [မေးစာ] [ပြန်စာ]` - စကားလုံး Auto ပြန်ဖြေခိုင်းရန် 💬\n"
-        "• `/stop [စာလုံး]` - Filter ပြန်ဖျက်ရန် ❌\n"
-        "• `/all` - Group ထဲရှိ လူအားလုံးကို Tag တွဲခေါ်ရန် 📢"
-    )
-    bot.reply_to(message, help_text, parse_mode="Markdown")
+@bot.message_handler(commands=['start'])
+def help_cmd(m):
+    bot.reply_to(m, "👋 Rain Bot အဆင်သင့်ဖြစ်ပါပြီဗျာ။\n\n🤖 `မေးခွန်း : အဖြေ` ပုံစံနဲ့ သင်ပေးထားရင် ဘယ် Group မှာမဆို အော်တို ဝင်ဖြေပေးမှာ ဖြစ်ပါတယ်!")
 
-@bot.message_handler(commands=['word'])
-def add_bad_word(message):
-    if is_admin(message):
-        word = message.text.replace('/word', '').strip().lower()
+@bot.message_handler(commands=['addbl'])
+def add_bl(m):
+    if is_admin(m):
+        word = m.text.replace('/addbl', '').strip().lower()
         if word:
-            db_action('INSERT OR REPLACE INTO bad_words (word) VALUES (?)', (word,))
-            bot.reply_to(message, f"🚫 စကားလုံး *'{word}'* ကို ပိတ်လိုက်ပါပြီ။ ရေးလာရင် Auto ဖျက်ပါမယ်။", parse_mode="Markdown")
+            db_action('INSERT OR REPLACE INTO blacklist (word) VALUES (?)', (word,))
+            bot.reply_to(m, f"🚫 '{word}' ကို ပိတ်လိုက်ပါပြီ။")
 
-@bot.message_handler(commands=['unword'])
-def remove_bad_word(message):
-    if is_admin(message):
-        word = message.text.replace('/unword', '').strip().lower()
+@bot.message_handler(commands=['rmbl'])
+def rm_bl(m):
+    if is_admin(m):
+        word = m.text.replace('/rmbl', '').strip().lower()
         if word:
-            db_action('DELETE FROM bad_words WHERE word=?', (word,))
-            bot.reply_to(message, f"✅ စကားလုံး *'{word}'* ကို ပြန်ဖွင့်ပေးလိုက်ပါပြီ။", parse_mode="Markdown")
+            db_action('DELETE FROM blacklist WHERE word=?', (word,))
+            bot.reply_to(m, f"✅ '{word}' ကို ပြန်ဖွင့်ပေးလိုက်ပါပြီ။")
 
-@bot.message_handler(commands=['filter'])
-def add_filter(message):
-    if is_admin(message):
-        args = message.text.replace('/filter', '').strip().split(' ', 1)
-        if len(args) == 2:
-            db_action('INSERT OR REPLACE INTO filters (keyword, reply) VALUES (?, ?)', (args[0].lower(), args[1]))
-            bot.reply_to(message, f"✅ Filter ထည့်ပြီးပါပြီ။ *'{args[0]}'* လို့ ရိုက်ရင် *'{args[1]}'* ဟု ပြန်ပါမည်။", parse_mode="Markdown")
-
-@bot.message_handler(commands=['stop'])
-def stop_filter(message):
-    if is_admin(message):
-        keyword = message.text.replace('/stop', '').strip().lower()
-        if keyword:
-            db_action('DELETE FROM filters WHERE keyword=?', (keyword,))
-            bot.reply_to(message, f"❌ Filter *'{keyword}'* ကို ဖြုတ်လိုက်ပါပြီ။", parse_mode="Markdown")
-
+# 📢 🌟 Group ရှိရှိသမျှ လူအကုန်လုံးကို Tag ခေါ်မည့်စနစ် (မင်းအခုလိုချင်တဲ့စနစ်) 🌟 📢
 @bot.message_handler(commands=['all'])
-def mention_all(message):
-    try:
-        admins = bot.get_chat_administrators(message.chat.id)
-        text = "📢 **Attention Everyone!**\n\n" + "".join([f"[{a.user.first_name}](tg://user?id={a.user.id}) " for a in admins if not a.user.is_bot])
-        bot.send_message(message.chat.id, text, parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ Tag ခေါ်မရပါ။ အကြောင်းရင်း - {e}")
+def tag_all_members(m):
+    if is_admin(m):
+        if m.chat.type == 'private':
+            bot.reply_to(m, "⚠️ ဒီ Command ကို Group ထဲမှာပဲ သုံးလို့ရပါတယ်ဗျာ။")
+            return
+            
+        # Database ထဲမှာ မှတ်ထားတဲ့ ဒီ Group က လူစာရင်းအကုန်လုံးကို ဆွဲထုတ်မယ်
+        rows = db_action('SELECT user_id, name FROM members WHERE chat_id=?', (m.chat.id,), fetchall=True)
+        
+        if not rows:
+            bot.reply_to(m, "📢 **Attention Everyone!**\n\n⚠️ (Bot ထည့်ပြီးနောက်ပိုင်း Group ထဲမှာ စာရိုက်ဖူးသူ မရှိသေးသဖြင့် Tag ခေါ်မည့် လူစာရင်း မရှိသေးပါဗျာ။ လူတွေ စာရိုက်လာရင် Auto မှတ်သွားပါလိမ့်မယ်။)")
+            return
+            
+        mention_text = "📢 **Attention Everyone!**\n\n"
+        
+        # Telegram က တစ်ခါ Tag ရင် စာလုံးရေအကန့်အသတ်ရှိလို့ လူ ၅၀ စီ ခွဲပြီး Tag ပါမယ်
+        chunk_size = 50
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i+chunk_size]
+            tags = []
+            for user_id, name in chunk:
+                # အထူးပြုလုပ်ချက် - အမည်ကို Link ပုံစံလုပ်ပြီး Tag ခေါ်ခြင်း
+                tags.append(f"[{name}](tg://user?id={user_id})")
+            
+            output_text = mention_text + " ".join(tags)
+            bot.send_message(m.chat.id, output_text, parse_mode="Markdown")
 
-# --- MESSAGE HANDLER ---
-@bot.message_handler(func=lambda message: True)
-def handle_messages(message):
-    user_text = (message.text or "").strip().lower()
+@bot.message_handler(commands=['warn'])
+def warn_cmd(m):
+    if is_admin(m) and m.reply_to_message:
+        uid = m.reply_to_message.from_user.id
+        row = db_action('SELECT count FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid), fetchone=True)
+        count = (row[0] if row else 0) + 1
+        if count >= 3:
+            try:
+                bot.ban_chat_member(m.chat.id, uid)
+                bot.reply_to(m, "🚨 သတိပေးချက် ၃ ကြိမ်ပြည့်၍ Kick ထုတ်လိုက်ပါပြီ။")
+            except: pass
+        else:
+            db_action('INSERT OR REPLACE INTO warns (chat_id, user_id, count) VALUES (?, ?, ?)', (m.chat.id, uid, count))
+            bot.reply_to(m, f"⚠️ သတိပေးချက် ({count}/3)")
+
+# --- MAIN LOGIC (Global Learning + Bad Words + Member Collector) ---
+@bot.message_handler(func=lambda m: True, content_types=['text', 'new_chat_members'])
+def main_logic(m):
+    # လူသစ်ဝင်လာရင် နာမည်ကို အော်တို မှတ်သားမယ်
+    if m.content_type == 'new_chat_members':
+        for member in m.new_chat_members:
+            if not member.is_bot:
+                db_action('INSERT OR REPLACE INTO members (chat_id, user_id, name) VALUES (?, ?, ?)', 
+                          (m.chat.id, member.id, member.first_name))
+        return
+
+    # ပုံမှန်စာရိုက်သူတွေရဲ့ ID နဲ့ နာမည်ကို Database ထဲ အော်တို သိမ်းဆည်းမည့်နေရာ
+    if m.chat.type != 'private' and m.from_user and not m.from_user.is_bot:
+        db_action('INSERT OR REPLACE INTO members (chat_id, user_id, name) VALUES (?, ?, ?)', 
+                  (m.chat.id, m.from_user.id, m.from_user.first_name))
+
+    text = (m.text or "").strip()
     
-    # ၁။ Bad Words Filter
-    blocked = db_action('SELECT word FROM bad_words', fetchall=True)
-    if blocked:
-        for row in blocked:
-            if row[0] in user_text:
-                try:
-                    bot.delete_message(message.chat.id, message.message_id)
-                    return
+    # ၁။ Bad Words Check
+    bls = db_action('SELECT word FROM blacklist', fetchall=True)
+    if bls:
+        for row in bls:
+            if row[0] in text.lower():
+                try: bot.delete_message(m.chat.id, m.message_id)
                 except: pass
+                return
 
-    # ၂။ စကားလုံး Filter စနစ်
-    filter_res = db_action('SELECT reply FROM filters WHERE keyword=?', (user_text,), fetchone=True)
-    if filter_res:
-        bot.reply_to(message, filter_res[0])
+    # ၂။ Global Learning
+    if ":" in text:
+        parts = text.split(":", 1)
+        q = parts[0].strip().lower()
+        a = parts[1].strip()
+        if q and a:
+            db_action('INSERT OR REPLACE INTO memory (q, a) VALUES (?, ?)', (q, a))
+            bot.reply_to(m, "✅ မှတ်သားပြီးပါပြီဗျာ။")
+            return
+
+    # ၃။ Global Auto Reply
+    res = db_action('SELECT a FROM memory WHERE q=?', (text.lower(),), fetchone=True)
+    if res: 
+        bot.reply_to(m, res[0])
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     bot.remove_webhook()
-    set_bot_commands()
-    print("[🚀] Rain Bot is perfectly running now...")
+    set_cmds()
     bot.infinity_polling(skip_pending=True)
     
