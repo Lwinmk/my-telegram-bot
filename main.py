@@ -7,7 +7,7 @@ from flask import Flask
 
 app = Flask('')
 @app.route('/')
-def home(): return "Live"
+def home(): return "Bot is Live"
 def run_flask(): app.run(host='0.0.0.0', port=8080)
 
 API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
@@ -24,7 +24,6 @@ def db(q, p=()):
     conn.close()
     return res
 
-# Databases Setup
 db('CREATE TABLE IF NOT EXISTS memory (q TEXT PRIMARY KEY, a TEXT)')
 db('CREATE TABLE IF NOT EXISTS bl (word TEXT PRIMARY KEY)')
 db('CREATE TABLE IF NOT EXISTS members (chat_id INTEGER, user_id INTEGER, name TEXT, PRIMARY KEY(chat_id, user_id))')
@@ -47,6 +46,7 @@ def set_cmds():
             telebot.types.BotCommand("all", "Group member mention all"),
             telebot.types.BotCommand("mute", "Member mute"),
             telebot.types.BotCommand("unmute", "Mute release"),
+            telebot.types.BotCommand("ban", "Ban user from group"),
             telebot.types.BotCommand("gpt", "AI Chat Debater"),
             telebot.types.BotCommand("topic", "Debate topics 30"),
             telebot.types.BotCommand("tiktok", "TikTok video download"),
@@ -56,9 +56,6 @@ def set_cmds():
         ])
     except: pass
 
-# --- Core Features Logic ---
-
-# 🌟 မင်းပြောတဲ့ Hello My Friend ပေါ်မယ့်အပိုင်းကို Group ရော Private ရော ရအောင် ပြင်ပေးထားပါတယ်
 @bot.message_handler(commands=['start', 'help'])
 def help_cmd(m):
     bot.reply_to(m, "Hello My Friend")
@@ -92,13 +89,16 @@ def mention(m):
         for i in range(0, len(tags), 50):
             bot.send_message(m.chat.id, " ".join(tags[i:i+50]), parse_mode="Markdown")
 
-@bot.message_handler(commands=['mute', 'unmute'])
-def mute_acts(m):
+@bot.message_handler(commands=['mute', 'unmute', 'ban'])
+def admin_acts(m):
     if is_admin(m) and m.reply_to_message:
         uid = m.reply_to_message.from_user.id
         if 'unmute' in m.text:
             bot.restrict_chat_member(m.chat.id, uid, can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True)
             bot.reply_to(m, "Unmuted.")
+        elif 'ban' in m.text:
+            bot.ban_chat_member(m.chat.id, uid)
+            bot.reply_to(m, "Banned from the group.")
         else:
             bot.restrict_chat_member(m.chat.id, uid, until_date=time.time()+3600)
             bot.reply_to(m, "Muted 1 Hour.")
@@ -180,7 +180,6 @@ def add_filters(m):
         w = m.text.replace(cmd, '').strip().lower()
         if w: db('INSERT OR REPLACE INTO bl VALUES (?)', (w,)); bot.reply_to(m, "Added.")
 
-# --- Auto Reply & Auto Delete System ---
 @bot.message_handler(func=lambda m: True, content_types=['text', 'new_chat_members'])
 def auto_handlers(m):
     if m.chat.type != 'private':
@@ -222,3 +221,4 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     set_cmds()
     bot.infinity_polling()
+    
