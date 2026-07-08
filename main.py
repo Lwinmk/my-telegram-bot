@@ -1,322 +1,162 @@
+import telebot
 import sqlite3
-import logging
-from telegram import Update, ChatPermissions
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+import threading
+import time
+from flask import Flask
 
-# ==========================
-# CONFIG
-# ==========================
+app = Flask('')
+@app.route('/')
+def home(): return "Bot is Live"
+def run_flask(): app.run(host='0.0.0.0', port=8080)
 
-BOT_TOKEN = "8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM"
-OWNER_ID = 5915848053
+API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
+bot = telebot.TeleBot(API_TOKEN)
+DB_PATH = 'data.db'
+OWNER_ID = 5915848053 
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO
-)
+def db(q, p=()):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(q, p)
+    res = c.fetchall()
+    conn.commit()
+    conn.close()
+    return res
 
-# ==========================
-# DATABASE
-# ==========================
+db('CREATE TABLE IF NOT EXISTS memory (q TEXT PRIMARY KEY, a TEXT, is_sticker INTEGER DEFAULT 0)')
+db('CREATE TABLE IF NOT EXISTS bl (word TEXT PRIMARY KEY)')
+db('CREATE TABLE IF NOT EXISTS members (chat_id INTEGER, user_id INTEGER, name TEXT, PRIMARY KEY(chat_id, user_id))')
+db('CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY)')
+db('CREATE TABLE IF NOT EXISTS warns (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY(chat_id, user_id))')
 
-db = sqlite3.connect("bot.db", check_same_thread=False)
-cur = db.cursor()
+def is_admin(m):
+    try: return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
+    except: return True
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS groups(
-chat_id INTEGER PRIMARY KEY,
-title TEXT
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS filters(
-word TEXT PRIMARY KEY
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS autoreply(
-word TEXT PRIMARY KEY,
-reply TEXT
-)
-""")
-
-db.commit()
-
-# ==========================
-# FUNCTIONS
-# ==========================
-
-def save_group(chat_id, title):
-    cur.execute(
-        "INSERT OR IGNORE INTO groups VALUES(?,?)",
-        (chat_id, title)
-    )
-    db.commit()
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_chat.type != "private":
-        save_group(
-            update.effective_chat.id,
-            update.effective_chat.title
+@bot.message_handler(commands=['start', 'help'])
+def start_cmd(m):
+    if m.chat.type == 'private':
+        cmds_text = (
+            "📌 **Available Commands:**\n\n"
+            "▫️ /id - Target Id View\n"
+            "▫️ /mute - Member mute (Reply)\n"
+            "▫️ /unmute - Mute release (Reply)\n"
+            "▫️ /kick - Kick user from group (Reply)\n"
+            "▫️ /ban - Ban user from group (Reply)\n"
+            "▫️ /warn - Warning 3 times auto mute (Reply)\n"
+            "▫️ /pin - Message reply pin (Reply)\n"
+            "▫️ /unpin - Unpin message\n"
+            "▫️ /filter - Add word to bad word list"
         )
+        bot.reply_to(m, cmds_text, parse_mode="Markdown")
+    else:
+        bot.reply_to(m, "Hello My Friend")
 
-    await update.message.reply_text(
-        "✅ Group Manager Bot Online"
-    )
+@bot.message_handler(commands=['status'])
+def status_cmd(m):
+    if m.from_user.id != OWNER_ID: return
+    g = len(db('SELECT * FROM groups'))
+    u = len(db('SELECT DISTINCT user_id FROM members'))
+    bot.reply_to(m, f"📊 Bot Statistics:\nGroups: {g}\nUsers: {u}")
 
+@bot.message_handler(commands=['broadcast'])
+def bc(m):
+    if m.from_user.id != OWNER_ID: return
+    txt = m.text.replace('/broadcast', '').strip()
+    if txt:
+        for row in db('SELECT chat_id FROM groups'):
+            try: bot.send_message(row[0], txt)
+            except: pass
+        bot.reply_to(m, "Broadcast done.")
 
-async def chatid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@bot.message_handler(commands=['mute', 'unmute', 'kick', 'ban'])
+def admin_acts(m):
+    if is_admin(m) and m.reply_to_message:
+        uid = m.reply_to_message.from_user.id
+        if 'unmute' in m.text:
+            bot.restrict_chat_member(m.chat.id, uid, can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True)
+            bot.reply_to(m, "Unmuted.")
+        elif 'kick' in m.text:
+            bot.ban_chat_member(m.chat.id, uid)
+            bot.unban_chat_member(m.chat.id, uid)
+            bot.reply_to(m, "Kicked.")
+        elif 'ban' in m.text:
+            bot.ban_chat_member(m.chat.id, uid)
+            bot.reply_to(m, "Banned.")
+        else:
+            bot.restrict_chat_member(m.chat.id, uid, until_date=time.time()+3600)
+            bot.reply_to(m, "Muted.")
 
-    await update.message.reply_text(
-        f"""
-Chat ID:
-{update.effective_chat.id}
+@bot.message_handler(commands=['pin', 'unpin'])
+def pin_acts(m):
+    if is_admin(m) and m.reply_to_message:
+        if 'unpin' in m.text: bot.unpin_chat_message(m.chat.id)
+        else: bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id)
 
-User ID:
-{update.effective_user.id}
-"""
-    )
+@bot.message_handler(commands=['warn'])
+def warn_user(m):
+    if is_admin(m) and m.reply_to_message:
+        uid = m.reply_to_message.from_user.id
+        res = db('SELECT count FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
+        count = (res[0][0] if res else 0) + 1
+        if count >= 3:
+            bot.restrict_chat_member(m.chat.id, uid, until_date=time.time()+86400)
+            db('DELETE FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
+            bot.reply_to(m, "Muted 24h (3/3 Warns).")
+        else:
+            db('INSERT OR REPLACE INTO warns VALUES (?,?,?)', (m.chat.id, uid, count))
+            bot.reply_to(m, f"Warned ({count}/3)")
 
+@bot.message_handler(commands=['addbl', 'quick', 'filter'])
+def add_filters(m):
+    if is_admin(m):
+        cmd = '/addbl' if '/addbl' in m.text else ('/quick' if '/quick' in m.text else '/filter')
+        w = m.text.replace(cmd, '').strip().lower()
+        if w: db('INSERT OR REPLACE INTO bl VALUES (?)', (w,)); bot.reply_to(m, "Added to Filter.")
 
-async def joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@bot.message_handler(func=lambda m: True, content_types=['text', 'sticker', 'new_chat_members'])
+def auto_handlers(m):
+    if m.chat.type != 'private':
+        db('INSERT OR REPLACE INTO groups VALUES (?)', (m.chat.id,))
+        if m.from_user and not m.from_user.is_bot:
+            db('INSERT OR REPLACE INTO members VALUES (?,?,?)', (m.chat.id, m.from_user.id, m.from_user.first_name))
+    
+    if m.content_type == 'new_chat_members': return
 
-    save_group(
-        update.effective_chat.id,
-        update.effective_chat.title
-    )
-
-# ==========================
-# PART 2 HERE
-# ==========================# ==========================
-# ADMIN CHECK
-# ==========================
-
-async def is_admin(update: Update):
-    chat = update.effective_chat.id
-    user = update.effective_user.id
-
-    member = await update.get_bot().get_chat_member(chat, user)
-    return member.status in ["administrator", "creator"]
-
-# ==========================
-# BAN USER
-# ==========================
-
-async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_admin(update):
-        return
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to user to ban.")
-        return
-
-    target = update.message.reply_to_message.from_user.id
-
-    try:
-        await context.bot.ban_chat_member(update.effective_chat.id, target)
-        await update.message.reply_text("🚫 User Banned")
-    except Exception as e:
-        await update.message.reply_text(str(e))
-
-# ==========================
-# KICK USER
-# ==========================
-
-async def kick(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_admin(update):
-        return
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to user to kick.")
-        return
-
-    target = update.message.reply_to_message.from_user.id
-
-    try:
-        await context.bot.ban_chat_member(update.effective_chat.id, target)
-        await context.bot.unban_chat_member(update.effective_chat.id, target)
-        await update.message.reply_text("👢 User Kicked")
-    except Exception as e:
-        await update.message.reply_text(str(e))
-
-# ==========================
-# MUTE USER
-# ==========================
-
-async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_admin(update):
-        return
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to user to mute.")
-        return
-
-    target = update.message.reply_to_message.from_user.id
-
-    permissions = ChatPermissions(
-        can_send_messages=False
-    )
-
-    try:
-        await context.bot.restrict_chat_member(
-            update.effective_chat.id,
-            target,
-            permissions
-        )
-        await update.message.reply_text("🔇 User Muted")
-    except Exception as e:
-        await update.message.reply_text(str(e))
-
-# ==========================
-# UNMUTE USER
-# ==========================
-
-async def unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_admin(update):
-        return
-
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to user to unmute.")
-        return
-
-    target = update.message.reply_to_message.from_user.id
-
-    permissions = ChatPermissions(
-        can_send_messages=True,
-        can_send_polls=True,
-        can_send_other_messages=True,
-        can_add_web_page_previews=True,
-        can_invite_users=True
-    )
-
-    try:
-        await context.bot.restrict_chat_member(
-            update.effective_chat.id,
-            target,
-            permissions
-        )
-        await update.message.reply_text("🔊 User Unmuted")
-    except Exception as e:
-        await update.message.reply_text(str(e))
-# ==========================
-# AUTO REPLY + FILTER CHECK (MESSAGE HANDLER)
-# ==========================
-
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not update.message:
-        return
-
-    text = update.message.text
-    if not text:
-        return
-
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    # ==========================
-    # WORD FILTER
-    # ==========================
-
-    cur.execute("SELECT word FROM filters")
-    bad_words = [i[0] for i in cur.fetchall()]
-
-    for w in bad_words:
-        if w.lower() in text.lower():
-            try:
-                await update.message.delete()
-                await update.message.reply_text("🚫 Word not allowed")
-                return
-            except:
+    if m.content_type == 'text' and m.reply_to_message and m.reply_to_message.content_type == 'sticker':
+        if m.text.strip().endswith(':'):
+            q = m.text.replace(':', '').strip().lower()
+            if q:
+                db('INSERT OR REPLACE INTO memory VALUES (?,?,1)', (q, m.reply_to_message.sticker.file_id))
+                bot.reply_to(m, "Sticker Saved.")
                 return
 
-    # ==========================
-    # AUTO REPLY
-    # ==========================
+    if m.content_type != 'text': return
+    txt = m.text.strip()
 
-    cur.execute("SELECT word, reply FROM autoreply")
-    replies = cur.fetchall()
-
-    for trigger, reply in replies:
-        if trigger.lower() in text.lower():
-            await update.message.reply_text(reply)
+    for row in db('SELECT * FROM bl'):
+        if row[0] in txt.lower():
+            try: bot.delete_message(m.chat.id, m.message_id)
+            except: pass
             return
 
-# ==========================
-# BROADCAST (OWNER ONLY)
-# ==========================
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("❌ Not allowed")
+    if ":" in txt:
+        q, a = [x.strip() for x in txt.split(":", 1)]
+        db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q.lower(), a))
+        bot.reply_to(m, "Saved.")
         return
 
-    if not context.args:
-        await update.message.reply_text("Usage: /broadcast message")
+    res = db('SELECT a, is_sticker FROM memory WHERE q=?', (txt.lower(),))
+    if res:
+        if res[0][1] == 1: bot.send_sticker(m.chat.id, res[0][0], reply_to_message_id=m.message_id)
+        else: bot.reply_to(m, res[0][0])
         return
 
-    msg = " ".join(context.args)
-
-    cur.execute("SELECT chat_id FROM groups")
-    groups = cur.fetchall()
-
-    sent = 0
-
-    for g in groups:
-        try:
-            await context.bot.send_message(g[0], msg)
-            sent += 1
-        except:
-            pass
-
-    await update.message.reply_text(f"✅ Sent to {sent} groups")
-# ==========================
-# MESSAGE HANDLER REGISTER
-# ==========================
-
-def main():
-
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("id", chatid))
-
-    app.add_handler(CommandHandler("ban", ban))
-    app.add_handler(CommandHandler("kick", kick))
-    app.add_handler(CommandHandler("mute", mute))
-    app.add_handler(CommandHandler("unmute", unmute))
-
-    app.add_handler(CommandHandler("broadcast", broadcast))
-
-    # Auto message handler (filter + auto reply)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    # New group detect
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, joined))
-
-    print("🤖 Bot is running...")
-    app.run_polling()
-
-
-# ==========================
-# START BOT
-# ==========================
+    if not txt.startswith('/'):
+        try: bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
+        except: pass
 
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=run_flask).start()
+    bot.infinity_polling()
+    
