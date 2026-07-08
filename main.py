@@ -1,13 +1,19 @@
-import telebot
+import os
+import time
 import sqlite3
 import threading
-import time
+import telebot
 from flask import Flask
 
 app = Flask('')
+
 @app.route('/')
-def home(): return "Bot is Live"
-def run_flask(): app.run(host='0.0.0.0', port=8080)
+def home():
+    return "Bot is Live"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
 bot = telebot.TeleBot(API_TOKEN)
@@ -30,8 +36,10 @@ db('CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY)')
 db('CREATE TABLE IF NOT EXISTS warns (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY(chat_id, user_id))')
 
 def is_admin(m):
-    try: return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
-    except: return True
+    try: 
+        return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
+    except: 
+        return True
 
 @bot.message_handler(commands=['start', 'help'])
 def start_cmd(m):
@@ -73,39 +81,71 @@ def bc(m):
 def admin_acts(m):
     if is_admin(m) and m.reply_to_message:
         uid = m.reply_to_message.from_user.id
-        if 'unmute' in m.text:
-            bot.restrict_chat_member(m.chat.id, uid, can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True)
-            bot.reply_to(m, "Unmuted.")
-        elif 'kick' in m.text:
-            bot.ban_chat_member(m.chat.id, uid)
-            bot.unban_chat_member(m.chat.id, uid)
-            bot.reply_to(m, "Kicked.")
-        elif 'ban' in m.text:
-            bot.ban_chat_member(m.chat.id, uid)
-            bot.reply_to(m, "Banned.")
-        else:
-            bot.restrict_chat_member(m.chat.id, uid, until_date=time.time()+3600)
-            bot.reply_to(m, "Muted.")
+        try:
+            if 'unmute' in m.text:
+                bot.restrict_chat_member(
+                    m.chat.id, uid, 
+                    permissions=telebot.types.ChatPermissions(
+                        can_send_messages=True, 
+                        can_send_media_messages=True, 
+                        can_send_other_messages=True
+                    )
+                )
+                bot.reply_to(m, "✅ Unmuted.")
+            elif 'kick' in m.text:
+                bot.ban_chat_member(m.chat.id, uid)
+                bot.unban_chat_member(m.chat.id, uid)
+                bot.reply_to(m, "👢 Kicked.")
+            elif 'ban' in m.text:
+                bot.ban_chat_member(m.chat.id, uid)
+                bot.reply_to(m, "🚫 Banned.")
+            else:
+                bot.restrict_chat_member(
+                    m.chat.id, uid, 
+                    permissions=telebot.types.ChatPermissions(
+                        can_send_messages=False,
+                        can_send_media_messages=False,
+                        can_send_other_messages=False
+                    ),
+                    until_date=int(time.time() + 3600)
+                )
+                bot.reply_to(m, "🔇 Muted for 1 Hour.")
+        except Exception as e:
+            bot.reply_to(m, f"❌ Admin Error: {e}")
 
 @bot.message_handler(commands=['pin', 'unpin'])
 def pin_acts(m):
-    if is_admin(m) and m.reply_to_message:
-        if 'unpin' in m.text: bot.unpin_chat_message(m.chat.id)
-        else: bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id)
+    if is_admin(m):
+        try:
+            if 'unpin' in m.text: bot.unpin_chat_message(m.chat.id)
+            elif m.reply_to_message: bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id)
+            bot.reply_to(m, "Done.")
+        except: pass
 
 @bot.message_handler(commands=['warn'])
 def warn_user(m):
     if is_admin(m) and m.reply_to_message:
         uid = m.reply_to_message.from_user.id
-        res = db('SELECT count FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
-        count = (res[0][0] if res else 0) + 1
-        if count >= 3:
-            bot.restrict_chat_member(m.chat.id, uid, until_date=time.time()+86400)
-            db('DELETE FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
-            bot.reply_to(m, "Muted 24h (3/3 Warns).")
-        else:
-            db('INSERT OR REPLACE INTO warns VALUES (?,?,?)', (m.chat.id, uid, count))
-            bot.reply_to(m, f"Warned ({count}/3)")
+        try:
+            res = db('SELECT count FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
+            count = (res[0][0] if res else 0) + 1
+            if count >= 3:
+                bot.restrict_chat_member(
+                    m.chat.id, uid,
+                    permissions=telebot.types.ChatPermissions(
+                        can_send_messages=False,
+                        can_send_media_messages=False,
+                        can_send_other_messages=False
+                    ),
+                    until_date=int(time.time() + 86400)
+                )
+                db('DELETE FROM warns WHERE chat_id=? AND user_id=?', (m.chat.id, uid))
+                bot.reply_to(m, "🔇 Auto Muted 24 Hours (3/3 Warns).")
+            else:
+                db('INSERT OR REPLACE INTO warns VALUES (?,?,?)', (m.chat.id, uid, count))
+                bot.reply_to(m, f"⚠️ Warned ({count}/3)")
+        except Exception as e:
+            bot.reply_to(m, f"❌ Error: {e}")
 
 @bot.message_handler(commands=['addbl', 'quick', 'filter'])
 def add_filters(m):
@@ -157,6 +197,8 @@ def auto_handlers(m):
         except: pass
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     bot.infinity_polling()
-    
+        
