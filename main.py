@@ -9,25 +9,32 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is Live"
+    return "Telegram Bot is Live and Running on Render!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        port = int(os.environ.get("PORT", 8080))
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"Flask Server Error: {e}")
 
 API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
-bot = telebot.TeleBot(API_TOKEN)
+bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
 OWNER_ID = 5915848053 
 
 def db(q, p=()):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(q, p)
-    res = c.fetchall()
-    conn.commit()
-    conn.close()
-    return res
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        c = conn.cursor()
+        c.execute(q, p)
+        res = c.fetchall()
+        conn.commit()
+        conn.close()
+        return res
+    except Exception as e:
+        print(f"Database Error: {e}")
+        return []
 
 db('CREATE TABLE IF NOT EXISTS memory (q TEXT PRIMARY KEY, a TEXT, is_sticker INTEGER DEFAULT 0)')
 db('CREATE TABLE IF NOT EXISTS bl (word TEXT PRIMARY KEY)')
@@ -59,6 +66,17 @@ def start_cmd(m):
         bot.reply_to(m, cmds_text, parse_mode="Markdown")
     else:
         bot.reply_to(m, "Hello My Friend")
+
+@bot.message_handler(commands=['id'])
+def get_id(m):
+    try:
+        if m.reply_to_message:
+            target = m.reply_to_message.from_user
+            bot.reply_to(m, f"👤 Name: {target.first_name}\n🆔 User ID: `{target.id}`", parse_mode="Markdown")
+        else:
+            bot.reply_to(m, f"👥 Chat ID: `{m.chat.id}`\n👤 Your ID: `{m.from_user.id}`", parse_mode="Markdown")
+    except:
+        pass
 
 @bot.message_handler(commands=['status'])
 def status_cmd(m):
@@ -117,10 +135,13 @@ def admin_acts(m):
 def pin_acts(m):
     if is_admin(m):
         try:
-            if 'unpin' in m.text: bot.unpin_chat_message(m.chat.id)
-            elif m.reply_to_message: bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id)
+            if 'unpin' in m.text: 
+                bot.unpin_chat_message(m.chat.id)
+            elif m.reply_to_message: 
+                bot.pin_chat_message(m.chat.id, m.reply_to_message.message_id)
             bot.reply_to(m, "Done.")
-        except: pass
+        except: 
+            pass
 
 @bot.message_handler(commands=['warn'])
 def warn_user(m):
@@ -152,23 +173,34 @@ def add_filters(m):
     if is_admin(m):
         cmd = '/addbl' if '/addbl' in m.text else ('/quick' if '/quick' in m.text else '/filter')
         w = m.text.replace(cmd, '').strip().lower()
-        if w: db('INSERT OR REPLACE INTO bl VALUES (?)', (w,)); bot.reply_to(m, "Added to Filter.")
+        if w: 
+            db('INSERT OR REPLACE INTO bl VALUES (?)', (w,))
+            bot.reply_to(m, f"Added '{w}' to Filter list.")
 
-@bot.message_handler(func=lambda m: True, content_types=['text', 'sticker', 'new_chat_members'])
+@bot.message_handler(func=lambda m: True, content_types=['text', 'sticker', 'new_chat_members', 'left_chat_member'])
 def auto_handlers(m):
     if m.chat.type != 'private':
         db('INSERT OR REPLACE INTO groups VALUES (?)', (m.chat.id,))
         if m.from_user and not m.from_user.is_bot:
             db('INSERT OR REPLACE INTO members VALUES (?,?,?)', (m.chat.id, m.from_user.id, m.from_user.first_name))
     
-    if m.content_type == 'new_chat_members': return
+    if m.content_type == 'new_chat_members':
+        for new_user in m.new_chat_members:
+            if not new_user.is_bot:
+                bot.send_message(m.chat.id, f"Welcome {new_user.first_name} to our group! 🎉")
+        return
+
+    if m.content_type == 'left_chat_member':
+        if not m.left_chat_member.is_bot:
+            bot.send_message(m.chat.id, f"Goodbye {m.left_chat_member.first_name}! 👋")
+        return
 
     if m.content_type == 'text' and m.reply_to_message and m.reply_to_message.content_type == 'sticker':
         if m.text.strip().endswith(':'):
             q = m.text.replace(':', '').strip().lower()
             if q:
                 db('INSERT OR REPLACE INTO memory VALUES (?,?,1)', (q, m.reply_to_message.sticker.file_id))
-                bot.reply_to(m, "Sticker Saved.")
+                bot.reply_to(m, "Sticker Saved Successful.")
                 return
 
     if m.content_type != 'text': return
@@ -176,29 +208,42 @@ def auto_handlers(m):
 
     for row in db('SELECT * FROM bl'):
         if row[0] in txt.lower():
-            try: bot.delete_message(m.chat.id, m.message_id)
-            except: pass
+            try: 
+                bot.delete_message(m.chat.id, m.message_id)
+            except: 
+                pass
             return
 
-    if ":" in txt:
+    if ":" in txt and not txt.startswith('/'):
         q, a = [x.strip() for x in txt.split(":", 1)]
-        db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q.lower(), a))
-        bot.reply_to(m, "Saved.")
-        return
+        if q and a:
+            db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q.lower(), a))
+            bot.reply_to(m, "Text Auto-Response Saved.")
+            return
 
     res = db('SELECT a, is_sticker FROM memory WHERE q=?', (txt.lower(),))
     if res:
-        if res[0][1] == 1: bot.send_sticker(m.chat.id, res[0][0], reply_to_message_id=m.message_id)
-        else: bot.reply_to(m, res[0][0])
+        if res[0][1] == 1: 
+            bot.send_sticker(m.chat.id, res[0][0], reply_to_message_id=m.message_id)
+        else: 
+            bot.reply_to(m, res[0][0])
         return
 
     if not txt.startswith('/'):
-        try: bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
-        except: pass
+        try: 
+            bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
+        except: 
+            pass
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-    bot.infinity_polling()
+    
+    while True:
+        try:
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except Exception as e:
+            print(f"Bot Connection Lost, Reconnecting... Error: {e}")
+            time.sleep(5)
         
