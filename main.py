@@ -1,6 +1,7 @@
 import os
 import time
 import sqlite3
+import random
 import threading
 import telebot
 from flask import Flask
@@ -48,13 +49,14 @@ def is_admin(m):
         return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
     except: 
         return True
+
 @bot.message_handler(commands=['start', 'help'])
 def start_cmd(m):
     if m.chat.type == 'private':
         cmds_text = (
             "📌 **Available Commands:**\n\n"
             "▫️ /id - Target Id View\n"
-            "▫️ /mute - Member mute (Reply)\n"
+            "▫️ /mute [time] [reason] - Mute User (Reply)\n"
             "▫️ /unmute - Mute release (Reply)\n"
             "▫️ /kick - Kick user from group (Reply)\n"
             "▫️ /ban - Ban user from group (Reply)\n"
@@ -116,15 +118,34 @@ def admin_acts(m):
             elif 'ban' in m.text:
                 bot.ban_chat_member(m.chat.id, uid)
                 bot.reply_to(m, "🚫 Banned.")
-            else:
+            elif 'mute' in m.text:
+                args = m.text.split()
+                until_time = 0
+                reason = "No reason provided"
+                
+                if len(args) > 1:
+                    time_str = args[1]
+                    unit = time_str[-1].lower()
+                    if unit in ['m', 'h', 'd'] and time_str[:-1].isdigit():
+                        val = int(time_str[:-1])
+                        if unit == 'm': until_time = int(time_time := time.time() + val * 60)
+                        elif unit == 'h': until_time = int(time_time := time.time() + val * 3600)
+                        elif unit == 'd': until_time = int(time_time := time.time() + val * 86400)
+                        if len(args) > 2:
+                            reason = " ".join(args[2:])
+                    else:
+                        reason = " ".join(args[1:])
+                
                 bot.restrict_chat_member(
                     m.chat.id, uid, 
                     permissions=telebot.types.ChatPermissions(
                         can_send_messages=False, can_send_media_messages=False, can_send_other_messages=False
                     ),
-                    until_date=int(time.time() + 3600)
+                    until_date=until_time if until_time > 0 else int(time.time() + 31536000)
                 )
-                bot.reply_to(m, "🔇 Muted for 1 Hour.")
+                
+                duration = args[1] if (until_time > 0 and len(args) > 1) else "Forever (Until Unmuted)"
+                bot.reply_to(m, f"🔇 **Muted**\n\n👤 **User:** {m.reply_to_message.from_user.first_name}\n⏳ **Duration:** {duration}\n📝 **Reason:** {reason}", parse_mode="Markdown")
         except Exception as e:
             bot.reply_to(m, f"❌ Admin Error: {e}")
 
@@ -219,13 +240,16 @@ def auto_handlers(m):
             bot.send_message(m.chat.id, f"Goodbye {m.left_chat_member.first_name}! 👋")
         return
 
-    if m.content_type == 'text' and m.reply_to_message and m.reply_to_message.content_type == 'sticker':
-        if m.text.strip().endswith(':'):
-            q = m.text.replace(':', '').strip().lower()
-            if q:
-                db('INSERT OR REPLACE INTO memory VALUES (?,?,1)', (q, m.reply_to_message.sticker.file_id))
-                bot.reply_to(m, "Sticker Response Saved Globally.")
-                return
+    if m.reply_to_message and not m.from_user.is_bot:
+        if m.reply_to_message.content_type == 'text':
+            q_text = m.reply_to_message.text.strip().lower()
+            if q_text and not q_text.startswith('/'):
+                if m.content_type == 'sticker':
+                    db('INSERT OR REPLACE INTO memory VALUES (?,?,1)', (q_text, m.sticker.file_id))
+                elif m.content_type == 'text':
+                    a_text = m.text.strip()
+                    if a_text and not a_text.startswith('/'):
+                        db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q_text, a_text))
 
     if m.content_type != 'text': return
     txt = m.text.strip()
@@ -234,13 +258,6 @@ def auto_handlers(m):
         if row[0] in txt.lower():
             try: bot.delete_message(m.chat.id, m.message_id)
             except: pass
-            return
-
-    if ":" in txt and not txt.startswith('/'):
-        q, a = [x.strip() for x in txt.split(":", 1)]
-        if q and a:
-            db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q.lower(), a))
-            bot.reply_to(m, "Text Auto-Response Saved Globally.")
             return
 
     res = db('SELECT a, is_sticker FROM memory WHERE q=?', (txt.lower(),))
@@ -252,8 +269,12 @@ def auto_handlers(m):
         return
 
     if not txt.startswith('/'):
-        try: bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
-        except: pass
+        try:
+
+            emo_list = ["👍", "❤️", "🔥", "🎉", "👏", "🤔", "😂", "🥰", "⚡"]
+            bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji=random.choice(emo_list))])
+        except: 
+            pass
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
@@ -265,4 +286,3 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-            
