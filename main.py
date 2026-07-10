@@ -9,7 +9,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Telegram Bot is Live and Running on Render!"
+    return "Bot is Live"
 
 def run_flask():
     try:
@@ -18,7 +18,7 @@ def run_flask():
     except Exception as e:
         print(f"Flask Server Error: {e}")
 
-API_TOKEN = '8666581291:AAEJgXWQUwsOdO0yT4-AFEqIj73z7arnrCM'
+API_TOKEN = '8666581291:AAGWGhaPcGJoSEfFU-KNOv5Hu4eVR5lX8bs'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
 OWNER_ID = 5915848053 
@@ -41,13 +41,13 @@ db('CREATE TABLE IF NOT EXISTS bl (word TEXT PRIMARY KEY)')
 db('CREATE TABLE IF NOT EXISTS members (chat_id INTEGER, user_id INTEGER, name TEXT, PRIMARY KEY(chat_id, user_id))')
 db('CREATE TABLE IF NOT EXISTS groups (chat_id INTEGER PRIMARY KEY)')
 db('CREATE TABLE IF NOT EXISTS warns (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY(chat_id, user_id))')
+db('CREATE TABLE IF NOT EXISTS settings (chat_id INTEGER PRIMARY KEY, rules TEXT, welcome TEXT)')
 
 def is_admin(m):
     try: 
         return bot.get_chat_member(m.chat.id, m.from_user.id).status in ['creator', 'administrator']
     except: 
         return True
-
 @bot.message_handler(commands=['start', 'help'])
 def start_cmd(m):
     if m.chat.type == 'private':
@@ -59,9 +59,11 @@ def start_cmd(m):
             "▫️ /kick - Kick user from group (Reply)\n"
             "▫️ /ban - Ban user from group (Reply)\n"
             "▫️ /warn - Warning 3 times auto mute (Reply)\n"
-            "▫️ /pin - Message reply pin (Reply)\n"
-            "▫️ /unpin - Unpin message\n"
-            "▫️ /filter - Add word to bad word list"
+            "▫️ /rules - View Group Rules\n"
+            "▫️ /setrules - Set Group Rules (Admin)\n"
+            "▫️ /setwelcome - Set Welcome Message (Admin)\n"
+            "▫️ /filter - Add word to bad word list (Admin)\n"
+            "▫️ /status - Bot Statistics (Everyone)"
         )
         bot.reply_to(m, cmds_text, parse_mode="Markdown")
     else:
@@ -80,10 +82,9 @@ def get_id(m):
 
 @bot.message_handler(commands=['status'])
 def status_cmd(m):
-    if m.from_user.id != OWNER_ID: return
     g = len(db('SELECT * FROM groups'))
     u = len(db('SELECT DISTINCT user_id FROM members'))
-    bot.reply_to(m, f"📊 Bot Statistics:\nGroups: {g}\nUsers: {u}")
+    bot.reply_to(m, f"📊 **Bot Statistics:**\n\n👥 Total Users: {u}\n🏠 Total Groups: {g}", parse_mode="Markdown")
 
 @bot.message_handler(commands=['broadcast'])
 def bc(m):
@@ -104,9 +105,7 @@ def admin_acts(m):
                 bot.restrict_chat_member(
                     m.chat.id, uid, 
                     permissions=telebot.types.ChatPermissions(
-                        can_send_messages=True, 
-                        can_send_media_messages=True, 
-                        can_send_other_messages=True
+                        can_send_messages=True, can_send_media_messages=True, can_send_other_messages=True
                     )
                 )
                 bot.reply_to(m, "✅ Unmuted.")
@@ -121,9 +120,7 @@ def admin_acts(m):
                 bot.restrict_chat_member(
                     m.chat.id, uid, 
                     permissions=telebot.types.ChatPermissions(
-                        can_send_messages=False,
-                        can_send_media_messages=False,
-                        can_send_other_messages=False
+                        can_send_messages=False, can_send_media_messages=False, can_send_other_messages=False
                     ),
                     until_date=int(time.time() + 3600)
                 )
@@ -154,9 +151,7 @@ def warn_user(m):
                 bot.restrict_chat_member(
                     m.chat.id, uid,
                     permissions=telebot.types.ChatPermissions(
-                        can_send_messages=False,
-                        can_send_media_messages=False,
-                        can_send_other_messages=False
+                        can_send_messages=False, can_send_media_messages=False, can_send_other_messages=False
                     ),
                     until_date=int(time.time() + 86400)
                 )
@@ -168,11 +163,34 @@ def warn_user(m):
         except Exception as e:
             bot.reply_to(m, f"❌ Error: {e}")
 
-@bot.message_handler(commands=['addbl', 'quick', 'filter'])
+@bot.message_handler(commands=['setrules'])
+def set_rules(m):
+    if is_admin(m):
+        txt = m.text.replace('/setrules', '').strip()
+        if txt:
+            db('INSERT INTO settings (chat_id, rules) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET rules=excluded.rules', (m.chat.id, txt))
+            bot.reply_to(m, "✅ Rules Saved.")
+
+@bot.message_handler(commands=['rules'])
+def view_rules(m):
+    res = db('SELECT rules FROM settings WHERE chat_id=?', (m.chat.id,))
+    if res and res[0][0]:
+        bot.reply_to(m, f"📋 **Group Rules:**\n\n{res[0][0]}")
+    else:
+        bot.reply_to(m, "❌ No rules set for this group yet.")
+
+@bot.message_handler(commands=['setwelcome'])
+def set_welcome(m):
+    if is_admin(m):
+        txt = m.text.replace('/setwelcome', '').strip()
+        if txt:
+            db('INSERT INTO settings (chat_id, welcome) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET welcome=excluded.welcome', (m.chat.id, txt))
+            bot.reply_to(m, "✅ Welcome Message Saved.")
+
+@bot.message_handler(commands=['filter'])
 def add_filters(m):
     if is_admin(m):
-        cmd = '/addbl' if '/addbl' in m.text else ('/quick' if '/quick' in m.text else '/filter')
-        w = m.text.replace(cmd, '').strip().lower()
+        w = m.text.replace('/filter', '').strip().lower()
         if w: 
             db('INSERT OR REPLACE INTO bl VALUES (?)', (w,))
             bot.reply_to(m, f"Added '{w}' to Filter list.")
@@ -183,11 +201,17 @@ def auto_handlers(m):
         db('INSERT OR REPLACE INTO groups VALUES (?)', (m.chat.id,))
         if m.from_user and not m.from_user.is_bot:
             db('INSERT OR REPLACE INTO members VALUES (?,?,?)', (m.chat.id, m.from_user.id, m.from_user.first_name))
+    else:
+        if m.from_user and not m.from_user.is_bot:
+            db('INSERT OR REPLACE INTO members VALUES (?,?,?)', (m.chat.id, m.from_user.id, m.from_user.first_name))
     
     if m.content_type == 'new_chat_members':
+        res = db('SELECT welcome FROM settings WHERE chat_id=?', (m.chat.id,))
+        w_text = res[0][0] if res and res[0][0] else "Welcome {name} to our group! 🎉"
         for new_user in m.new_chat_members:
             if not new_user.is_bot:
-                bot.send_message(m.chat.id, f"Welcome {new_user.first_name} to our group! 🎉")
+                formatted_text = w_text.replace("{name}", new_user.first_name)
+                bot.send_message(m.chat.id, formatted_text)
         return
 
     if m.content_type == 'left_chat_member':
@@ -200,7 +224,7 @@ def auto_handlers(m):
             q = m.text.replace(':', '').strip().lower()
             if q:
                 db('INSERT OR REPLACE INTO memory VALUES (?,?,1)', (q, m.reply_to_message.sticker.file_id))
-                bot.reply_to(m, "Sticker Saved Successful.")
+                bot.reply_to(m, "Sticker Response Saved Globally.")
                 return
 
     if m.content_type != 'text': return
@@ -208,17 +232,15 @@ def auto_handlers(m):
 
     for row in db('SELECT * FROM bl'):
         if row[0] in txt.lower():
-            try: 
-                bot.delete_message(m.chat.id, m.message_id)
-            except: 
-                pass
+            try: bot.delete_message(m.chat.id, m.message_id)
+            except: pass
             return
 
     if ":" in txt and not txt.startswith('/'):
         q, a = [x.strip() for x in txt.split(":", 1)]
         if q and a:
             db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q.lower(), a))
-            bot.reply_to(m, "Text Auto-Response Saved.")
+            bot.reply_to(m, "Text Auto-Response Saved Globally.")
             return
 
     res = db('SELECT a, is_sticker FROM memory WHERE q=?', (txt.lower(),))
@@ -230,10 +252,8 @@ def auto_handlers(m):
         return
 
     if not txt.startswith('/'):
-        try: 
-            bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
-        except: 
-            pass
+        try: bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji="👍")])
+        except: pass
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
@@ -244,6 +264,5 @@ if __name__ == "__main__":
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
-            print(f"Bot Connection Lost, Reconnecting... Error: {e}")
             time.sleep(5)
-        
+            
