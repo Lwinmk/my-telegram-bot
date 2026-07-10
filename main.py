@@ -50,6 +50,25 @@ def is_admin(m):
     except: 
         return True
 
+def typing_effect(chat_id, reply_to_id, full_text):
+    try:
+        msg = bot.send_message(chat_id, full_text[0], reply_to_message_id=reply_to_id)
+        current_text = full_text[0]
+        step = 3
+        for i in range(1, len(full_text), step):
+            current_text += full_text[i:i+step]
+            try:
+                bot.edit_message_text(current_text, chat_id, msg.message_id)
+                time.sleep(0.2)
+            except:
+                pass
+        if current_text != full_text:
+            try: bot.edit_message_text(full_text, chat_id, msg.message_id)
+            except: pass
+    except:
+        try: bot.send_message(chat_id, full_text, reply_to_message_id=reply_to_id)
+        except: pass
+
 @bot.message_handler(commands=['start', 'help'])
 def start_cmd(m):
     if m.chat.type == 'private':
@@ -67,9 +86,9 @@ def start_cmd(m):
             "▫️ /filter - Add word to bad word list (Admin)\n"
             "▫️ /status - Bot Statistics (Everyone)"
         )
-        bot.reply_to(m, cmds_text, parse_mode="Markdown")
+        threading.Thread(target=typing_effect, args=(m.chat.id, m.message_id, cmds_text)).start()
     else:
-        bot.reply_to(m, "Hello My Friend")
+        threading.Thread(target=typing_effect, args=(m.chat.id, m.message_id, "Hello My Friend 👋")).start()
 
 @bot.message_handler(commands=['id'])
 def get_id(m):
@@ -128,9 +147,9 @@ def admin_acts(m):
                     unit = time_str[-1].lower()
                     if unit in ['m', 'h', 'd'] and time_str[:-1].isdigit():
                         val = int(time_str[:-1])
-                        if unit == 'm': until_time = int(time_time := time.time() + val * 60)
-                        elif unit == 'h': until_time = int(time_time := time.time() + val * 3600)
-                        elif unit == 'd': until_time = int(time_time := time.time() + val * 86400)
+                        if unit == 'm': until_time = int(time.time() + val * 60)
+                        elif unit == 'h': until_time = int(time.time() + val * 3600)
+                        elif unit == 'd': until_time = int(time.time() + val * 86400)
                         if len(args) > 2:
                             reason = " ".join(args[2:])
                     else:
@@ -265,12 +284,11 @@ def auto_handlers(m):
         if res[0][1] == 1: 
             bot.send_sticker(m.chat.id, res[0][0], reply_to_message_id=m.message_id)
         else: 
-            bot.reply_to(m, res[0][0])
+            threading.Thread(target=typing_effect, args=(m.chat.id, m.message_id, res[0][0])).start()
         return
 
     if not txt.startswith('/'):
         try:
-
             emo_list = ["👍", "❤️", "🔥", "🎉", "👏", "🤔", "😂", "🥰", "⚡"]
             bot.set_message_reaction(m.chat.id, m.message_id, [telebot.types.ReactionTypeEmoji(emoji=random.choice(emo_list))])
         except: 
@@ -286,3 +304,4 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
+        
