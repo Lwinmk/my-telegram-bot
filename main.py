@@ -136,6 +136,7 @@ def admin_acts(m):
                 bot.reply_to(m, "👢 Kicked.")
             elif 'ban' in m.text:
                 bot.ban_chat_member(m.chat.id, uid)
+                bot.unban_chat_member(m.chat.id, uid)
                 bot.reply_to(m, "🚫 Banned.")
             elif 'mute' in m.text:
                 args = m.text.split()
@@ -270,6 +271,9 @@ def auto_handlers(m):
                     if a_text and not a_text.startswith('/'):
                         db('INSERT OR REPLACE INTO memory VALUES (?,?,0)', (q_text, a_text))
 
+    if m.content_type == 'sticker' and not m.from_user.is_bot:
+        pass
+
     if m.content_type != 'text': return
     txt = m.text.strip()
 
@@ -284,7 +288,7 @@ def auto_handlers(m):
         if res[0][1] == 1: 
             bot.send_sticker(m.chat.id, res[0][0], reply_to_message_id=m.message_id)
         else: 
-            threading.Thread(target=typing_effect, args=(m.chat.id, m.message_id, res[0][0])).start()
+            bot.reply_to(m, res[0][0])
         return
 
     if not txt.startswith('/'):
@@ -304,4 +308,4 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-        
+                                
