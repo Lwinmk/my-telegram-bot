@@ -19,7 +19,7 @@ def run_flask():
     except Exception as e:
         print(f"Flask Server Error: {e}")
 
-API_TOKEN = '8666581291:AAGWGhaPcGJoSEfFU-KNOv5Hu4eVR5lX8bs'
+API_TOKEN = '8666581291:AAH3j9ozaTfe44OsJ7zo7gWfipQOoHsbTV4'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
 OWNER_ID = 5915848053 
@@ -312,9 +312,14 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+    except:
+        pass
+        
     while True:
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-                                    
+                
