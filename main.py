@@ -110,12 +110,21 @@ def status_cmd(m):
 @bot.message_handler(commands=['broadcast'])
 def bc(m):
     if m.from_user.id != OWNER_ID: return
-    txt = m.text.replace('/broadcast', '').strip()
-    if txt:
+    
+    if m.reply_to_message:
         for row in db('SELECT chat_id FROM groups'):
-            try: bot.send_message(row[0], txt)
-            except: pass
-        bot.reply_to(m, "Broadcast done.")
+            try:
+                bot.forward_message(row[0], m.chat.id, m.reply_to_message.message_id)
+            except:
+                pass
+        bot.reply_to(m, "Broadcast (Forwarded) done.")
+    else:
+        txt = m.text.replace('/broadcast', '').strip()
+        if txt:
+            for row in db('SELECT chat_id FROM groups'):
+                try: bot.send_message(row[0], txt)
+                except: pass
+            bot.reply_to(m, "Broadcast done.")
 
 @bot.message_handler(commands=['mute', 'unmute', 'kick', 'ban'])
 def admin_acts(m):
@@ -308,4 +317,4 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-                                
+                                    
