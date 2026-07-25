@@ -75,6 +75,8 @@ def start_cmd(m):
         cmds_text = (
             "📌 **Available Commands:**\n\n"
             "▫️ /id - Target Id View\n"
+            "▫️ /promote - Promote user to Admin (Reply)\n"
+            "▫️ /demote - Remove Admin status (Reply)\n"
             "▫️ /mute [time] [reason] - Mute User (Reply)\n"
             "▫️ /unmute - Mute release (Reply)\n"
             "▫️ /kick - Kick user from group (Reply)\n"
@@ -106,6 +108,39 @@ def status_cmd(m):
     g = len(db('SELECT * FROM groups'))
     u = len(db('SELECT DISTINCT user_id FROM members'))
     bot.reply_to(m, f"📊 **Bot Statistics:**\n\n👥 Total Users: {u}\n🏠 Total Groups: {g}", parse_mode="Markdown")
+
+@bot.message_handler(commands=['promote', 'demote'])
+def admin_promote_demote(m):
+    if is_admin(m) and m.reply_to_message:
+        uid = m.reply_to_message.from_user.id
+        try:
+            if 'promote' in m.text:
+                bot.promote_chat_member(
+                    m.chat.id, uid,
+                    can_change_info=True,
+                    can_delete_messages=True,
+                    can_invite_users=True,
+                    can_restrict_members=True,
+                    can_pin_messages=True,
+                    can_manage_video_chats=True
+                )
+                bot.reply_to(m, f"✅ **{m.reply_to_message.from_user.first_name}** is now an Admin!")
+            elif 'demote' in m.text:
+                bot.promote_chat_member(
+                    m.chat.id, uid,
+                    can_change_info=False,
+                    can_post_messages=False,
+                    can_edit_messages=False,
+                    can_delete_messages=False,
+                    can_invite_users=False,
+                    can_restrict_members=False,
+                    can_pin_messages=False,
+                    can_promote_members=False,
+                    can_manage_video_chats=False
+                )
+                bot.reply_to(m, f"❌ Admin privileges removed for **{m.reply_to_message.from_user.first_name}**.")
+        except Exception as e:
+            bot.reply_to(m, f"❌ Error: {e}")
 
 @bot.message_handler(commands=['broadcast'])
 def bc(m):
@@ -322,4 +357,4 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-                
+            
