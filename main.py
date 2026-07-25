@@ -19,7 +19,8 @@ def run_flask():
     except Exception as e:
         print(f"Flask Server Error: {e}")
 
-API_TOKEN = '8666581291:AAH3j9ozaTfe44OsJ7zo7gWfipQOoHsbTV4'
+# Token အသစ် အစားထိုးထားသည်
+API_TOKEN = '8666581291:AAHQEqwoLiU0zrCWin1_-KR6G6_gNSlYf7M'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
 OWNER_ID = 5915848053 
@@ -357,4 +358,4 @@ if __name__ == "__main__":
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
             time.sleep(5)
-            
+                
