@@ -23,7 +23,7 @@ def run_flask():
 API_TOKEN = '8666581291:AAHQEqwoLiU0zrCWin1_-KR6G6_gNSlYf7M'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
-OWNER_ID = 5915848053 
+OWNER_ID = 8666581291 
 
 def db(q, p=()):
     try:
