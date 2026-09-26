@@ -23,8 +23,7 @@ def run_flask():
 API_TOKEN = '8757489052:AAHpnMejddgncbqpKTYfcfS_rWLYLTDbY2Y'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
-OWNER_ID = 6767500672 
-
+OWNER_ID = 7957905168
 def db(q, p=()):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
