@@ -20,7 +20,7 @@ def run_flask():
         print(f"Flask Server Error: {e}")
 
 # Token အသစ် အစားထိုးထားသည်
-API_TOKEN = '8666581291:AAHQEqwoLiU0zrCWin1_-KR6G6_gNSlYf7M'
+API_TOKEN = '8757489052:AAHpnMejddgncbqpKTYfcfS_rWLYLTDbY2Y'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=10)
 DB_PATH = 'data.db'
 OWNER_ID = 6767500672 
